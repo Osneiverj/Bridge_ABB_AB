@@ -1,47 +1,52 @@
-"""Communication schema shared by the bridge codecs.
-"""
+"""Central communication schema for ABB <-> Python <-> PLC bridge."""
 
-ABB_FRAME_START = "|"
-ABB_FRAME_END = "|"
+from __future__ import annotations
+
+from copy import deepcopy
+
+BITS_DINT_COUNT = 6
+STATUS_COUNT = 26
+PARAMETERS_COUNT = 26
 
 COMM_SCHEMA = {
-    "plc_to_robot": {
-        "root_tag": "PLC_TO_ROBOT_IF",
-        "digital_dints": 6,
+    "abb_to_plc": {
+        "root_tag": "ABB_TO_PLC_IF",
+        "bits_dint_count": BITS_DINT_COUNT,
         "sections": [
-            {"name": "Status", "size": 26, "type": "INT"},
-            {"name": "Parameters", "size": 26, "type": "INT"},
+            {"name": "status", "type": "int_array", "size": STATUS_COUNT},
+            {"name": "parameters", "type": "int_array", "size": PARAMETERS_COUNT},
         ],
     },
-    "robot_to_plc": {
-        "root_tag": "ROBOT_TO_PLC_IF",
-        "digital_dints": 6,
+    "plc_to_abb": {
+        "root_tag": "PLC_TO_ABB_IF",
+        "bits_dint_count": BITS_DINT_COUNT,
         "sections": [
-            {"name": "Status", "size": 26, "type": "INT"},
-            {"name": "Parameters", "size": 26, "type": "INT"},
+            {"name": "status", "type": "int_array", "size": STATUS_COUNT},
+            {"name": "parameters", "type": "int_array", "size": PARAMETERS_COUNT},
         ],
     },
 }
 
 
-# Watchdog convention used by the current example table.
-# Status[0] is the watchdog word in both directions.
-WATCHDOG_SECTION = "Status"
-WATCHDOG_INDEX = 0
-
-
-def make_empty_direction(direction: str) -> dict:
-    """Create an empty image dictionary for one communication direction."""
+def total_frame_bytes(direction: str = "abb_to_plc") -> int:
+    """Return frame size in bytes for a direction defined in the schema."""
     cfg = COMM_SCHEMA[direction]
-    image = {
-        "Bits": [0] * cfg["digital_dints"],
-    }
+    bits_bytes = cfg["bits_dint_count"] * 4
+    int16_bytes = sum(section["size"] for section in cfg["sections"]) * 2
+    return bits_bytes + int16_bytes
 
+
+ABB_FRAME_BYTES = total_frame_bytes("abb_to_plc")
+
+
+def empty_image(direction: str) -> dict:
+    """Create an empty image according to schema."""
+    cfg = COMM_SCHEMA[direction]
+    image = {"bits": [0] * cfg["bits_dint_count"]}
     for section in cfg["sections"]:
         image[section["name"]] = [0] * section["size"]
-
     return image
 
 
-PLC_TO_ROBOT_EMPTY = make_empty_direction("plc_to_robot")
-ROBOT_TO_PLC_EMPTY = make_empty_direction("robot_to_plc")
+ABB_TO_PLC_EMPTY = deepcopy(empty_image("abb_to_plc"))
+PLC_TO_ABB_EMPTY = deepcopy(empty_image("plc_to_abb"))

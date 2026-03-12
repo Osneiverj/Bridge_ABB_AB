@@ -1,348 +1,186 @@
 MODULE Comm_ABB_AB_Socket
 
     !========================================================
-    !  CONFIGURATION
+    !  ABB socket client transport (binary rawbytes)
     !========================================================
-    CONST string cRemoteIP := "127.0.0.1";
-    CONST num cPort := 3552;
 
-    CONST num cRxTimeout := 1;
-    CONST num cReconnectWait := 0.2;
-    CONST num cLoopWait := 0.05;
-    CONST num cMaxTimeoutCycles := 5;
+    CONST string cServerIp := "10.22.64.20";
+    CONST num cServerPort := 3552;
 
-    CONST string cFrameStart := "|";
-    CONST string cFrameEnd := "|";
+    CONST num cFrameBytes := 128;
+    CONST num cLoopDelay := 0.02;
+    CONST num cReconnectWait := 0.50;
+    CONST num cSocketTimeout := 1.00;
+    CONST num cMaxTimeoutCycles := 10;
 
-    !========================================================
-    !  SOCKET
-    !========================================================
-    VAR socketdev socket1;
-    VAR socketstatus socketState;
+    VAR socketdev clientSocket;
     VAR bool bSocketCreated := FALSE;
+    VAR bool bConnected := FALSE;
 
-    !========================================================
-    !  BUFFERS
-    !========================================================
-    VAR string txPayload := "";
-    VAR string txFrame := "";
-    VAR string rxFrame := "";
-    VAR string rxPayload := "";
+    VAR rawbytes txFrame;
+    VAR rawbytes rxFrame;
 
-    !========================================================
-    !  PUBLIC ENTRY POINT
-    !========================================================
-
-    PROC main()
-        CommRun;
-    ENDPROC
-
-
-    PROC CommRun()
-
-        CommInit;
+    PROC Comm_Main()
 
         WHILE TRUE DO
-            CommCycle;
-            WaitTime cLoopWait;
+
+            IF NOT bConnected THEN
+                ConnectLoop;
+            ENDIF
+
+            IF bConnected THEN
+                CommCycle;
+            ENDIF
+
+            WaitTime cLoopDelay;
+
         ENDWHILE
 
     ENDPROC
 
 
-    PROC CommInit()
+    PROC ConnectLoop()
 
-        ResetViData;
-        ResetCommState;
-        CloseSocketSafe;
+        SocketCloseSafe;
 
-    ENDPROC
+        ERROR
+            SocketCloseSafe;
+        ENDERROR
 
-    !========================================================
-    !  MAIN COMMUNICATION CYCLE
-    !========================================================
+        SocketCreate clientSocket;
+        bSocketCreated := TRUE;
 
-    PROC CommCycle()
+        SocketConnect clientSocket, cServerIp, cServerPort\Time:=cSocketTimeout;
 
-        EnsureConnected;
-
-        IF NOT IsSocketConnected() THEN
-            WaitTime cReconnectWait;
-            RETURN;
-        ENDIF
-
-        BuildTxFrame;
-
-        rxFrame := "";
-        SocketSend socket1\Str:=txFrame;
-        SocketReceive socket1\Str:=rxFrame\Time:=cRxTimeout;
-
-        IF NOT ExtractPayload(rxFrame) THEN
-            HandleInvalidFrame;
-            RETURN;
-        ENDIF
-
-        ParseRxPayload rxPayload;
-
+        bConnected := TRUE;
         CommOK := TRUE;
         CommFault := FALSE;
-        NewData := TRUE;
         CommLastError := 0;
         CommTimeoutCycles := 0;
-        CommRxFrameCounter := CommRxFrameCounter + 1;
-        CommTxFrameCounter := CommTxFrameCounter + 1;
+
+        RETURN;
 
     ERROR
-
         HandleCommError ERRNO;
         RETURN;
 
     ENDPROC
 
-    !========================================================
-    !  SOCKET MANAGEMENT
-    !========================================================
 
-    PROC EnsureConnected()
+    PROC CommCycle()
 
-        IF IsSocketConnected() THEN
-            RETURN;
-        ENDIF
+        BuildTxFrame;
 
-        TrySocketOpen;
+        SocketSend clientSocket\RawData:=txFrame\NoOfBytes:=cFrameBytes\Time:=cSocketTimeout;
+        SocketReceive clientSocket\RawData:=rxFrame\ReadNoOfBytes:=cFrameBytes\Time:=cSocketTimeout;
 
-    ENDPROC
-
-
-    PROC TrySocketOpen()
-
-        CloseSocketSafe;
-
-        SocketCreate socket1;
-        bSocketCreated := TRUE;
-
-        SocketConnect socket1, cRemoteIP, cPort\Time:=cRxTimeout;
+        ParseRxFrame;
 
         CommOK := TRUE;
         CommFault := FALSE;
         CommLastError := 0;
         CommTimeoutCycles := 0;
+        NewData := TRUE;
+
+        RETURN;
 
     ERROR
-
-        CommOK := FALSE;
-        CommFault := TRUE;
-        CommLastError := ERRNO;
         NewData := FALSE;
-
-        CloseSocketSafe;
-        WaitTime cReconnectWait;
+        HandleCommError ERRNO;
         RETURN;
 
     ENDPROC
 
-
-    FUNC bool IsSocketConnected()
-
-        IF NOT bSocketCreated THEN
-            RETURN FALSE;
-        ENDIF
-
-        socketState := SocketGetStatus(socket1);
-
-        IF socketState = SOCKET_CONNECTED THEN
-            RETURN TRUE;
-        ELSE
-            RETURN FALSE;
-        ENDIF
-
-    ENDFUNC
-
-
-    PROC CloseSocketSafe()
-
-        IF bSocketCreated THEN
-            SocketClose socket1;
-        ENDIF
-
-        bSocketCreated := FALSE;
-
-    ERROR
-        bSocketCreated := FALSE;
-        RETURN;
-    ENDPROC
-
-    !========================================================
-    !  ERROR HANDLING
-    !========================================================
-
-    PROC HandleCommError(num nError)
-
-        CommOK := FALSE;
-        NewData := FALSE;
-        CommLastError := nError;
-
-        IF nError = ERR_SOCK_TIMEOUT THEN
-
-            CommTimeoutCycles := CommTimeoutCycles + 1;
-
-            IF CommTimeoutCycles >= cMaxTimeoutCycles THEN
-                CommFault := TRUE;
-            ENDIF
-
-        ELSEIF nError = ERR_SOCK_CLOSED THEN
-
-            CommFault := TRUE;
-
-        ELSE
-
-            CommFault := TRUE;
-
-        ENDIF
-
-        CloseSocketSafe;
-        WaitTime cReconnectWait;
-
-    ENDPROC
-
-
-    PROC HandleInvalidFrame()
-
-        CommOK := FALSE;
-        CommFault := TRUE;
-        NewData := FALSE;
-        CommLastError := -1;
-
-    ENDPROC
-
-    !========================================================
-    !  FRAME BUILDING
-    !========================================================
 
     PROC BuildTxFrame()
 
         VAR num i;
+        VAR num pos;
 
-        txPayload := "";
+        ClearRawBytes txFrame;
+        pos := 1;
 
         FOR i FROM 1 TO 6 DO
-            txPayload := AddField(txPayload, NumToStr(VO_Bits{i},0));
+            PackRawBytes VO_Bits{i}, txFrame, pos\DINT;
+            pos := pos + 4;
         ENDFOR
 
         FOR i FROM 1 TO 26 DO
-            txPayload := AddField(txPayload, NumToStr(VO_Status{i},0));
+            PackRawBytes VO_Status{i}, txFrame, pos\INT;
+            pos := pos + 2;
         ENDFOR
 
         FOR i FROM 1 TO 26 DO
-            txPayload := AddField(txPayload, NumToStr(VO_Parameters{i},0));
+            PackRawBytes VO_Parameters{i}, txFrame, pos\INT;
+            pos := pos + 2;
         ENDFOR
-
-        txFrame := cFrameStart + txPayload + cFrameEnd;
 
     ENDPROC
 
 
-    FUNC string AddField(string sCurrent, string sField)
-
-        IF StrLen(sCurrent) = 0 THEN
-            RETURN sField;
-        ELSE
-            RETURN sCurrent + "," + sField;
-        ENDIF
-
-    ENDFUNC
-
-    !========================================================
-    !  FRAME PARSER
-    !========================================================
-
-    FUNC bool ExtractPayload(string sFrame)
-
-        VAR num nLen;
-
-        nLen := StrLen(sFrame);
-
-        IF nLen < 3 THEN
-            RETURN FALSE;
-        ENDIF
-
-        IF StrPart(sFrame,1,1) <> cFrameStart THEN
-            RETURN FALSE;
-        ENDIF
-
-        IF StrPart(sFrame,nLen,1) <> cFrameEnd THEN
-            RETURN FALSE;
-        ENDIF
-
-        rxPayload := StrPart(sFrame,2,nLen-2);
-        RETURN TRUE;
-
-    ENDFUNC
-
-
-    PROC ParseRxPayload(string sPayload)
+    PROC ParseRxFrame()
 
         VAR num i;
-        VAR num startPos;
-        VAR num commaPos;
-        VAR num totalLen;
-        VAR string token;
-        VAR num tmp;
-        VAR bool ok;
+        VAR num pos;
+        VAR num tempNum;
 
-        startPos := 1;
-        totalLen := StrLen(sPayload);
+        pos := 1;
 
         FOR i FROM 1 TO 6 DO
-            ReadNextField sPayload, startPos, totalLen, i < 58, token;
-            ok := StrToVal(token, tmp);
-            IF NOT ok THEN
-                HandleInvalidFrame;
-                RETURN;
-            ENDIF
-            VI_Bits{i} := tmp;
+            UnPackRawBytes rxFrame, pos, tempNum\DINT;
+            VI_Bits{i} := tempNum;
+            pos := pos + 4;
         ENDFOR
 
         FOR i FROM 1 TO 26 DO
-            ReadNextField sPayload, startPos, totalLen, TRUE, token;
-            ok := StrToVal(token, tmp);
-            IF NOT ok THEN
-                HandleInvalidFrame;
-                RETURN;
-            ENDIF
-            VI_Status{i} := tmp;
+            UnPackRawBytes rxFrame, pos, tempNum\INT;
+            VI_Status{i} := tempNum;
+            pos := pos + 2;
         ENDFOR
 
         FOR i FROM 1 TO 26 DO
-            ReadNextField sPayload, startPos, totalLen, i < 26, token;
-            ok := StrToVal(token, tmp);
-            IF NOT ok THEN
-                HandleInvalidFrame;
-                RETURN;
-            ENDIF
-            VI_Parameters{i} := tmp;
+            UnPackRawBytes rxFrame, pos, tempNum\INT;
+            VI_Parameters{i} := tempNum;
+            pos := pos + 2;
         ENDFOR
 
     ENDPROC
 
 
-    PROC ReadNextField(string sPayload, VAR num startPos, num totalLen, bool expectComma, VAR string token)
+    PROC HandleCommError(num nError)
 
-        VAR num commaPos;
+        CommOK := FALSE;
+        CommLastError := nError;
 
-        IF expectComma THEN
-            commaPos := StrFind(sPayload, startPos, ",");
-            IF commaPos = 0 THEN
-                token := "";
-                RETURN;
+        IF nError = ERR_SOCK_TIMEOUT THEN
+            CommTimeoutCycles := CommTimeoutCycles + 1;
+            IF CommTimeoutCycles >= cMaxTimeoutCycles THEN
+                CommFault := TRUE;
             ENDIF
-
-            token := StrPart(sPayload, startPos, commaPos - startPos);
-            startPos := commaPos + 1;
         ELSE
-            token := StrPart(sPayload, startPos, totalLen - startPos + 1);
-            startPos := totalLen + 1;
+            CommFault := TRUE;
         ENDIF
+
+        bConnected := FALSE;
+        SocketCloseSafe;
+        WaitTime cReconnectWait;
+
+    ENDPROC
+
+
+    PROC SocketCloseSafe()
+
+        IF bSocketCreated THEN
+            SocketClose clientSocket;
+        ENDIF
+
+        bSocketCreated := FALSE;
+        bConnected := FALSE;
+
+    ERROR
+        bSocketCreated := FALSE;
+        bConnected := FALSE;
+        RETURN;
 
     ENDPROC
 
