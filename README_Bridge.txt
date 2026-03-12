@@ -30,7 +30,7 @@ Python side
   - pack_abb_frame(bits, status, parameters) -> 128 bytes
   - unpack_abb_frame(data) -> {"bits", "status", "parameters"}
 - plc_codec.py maps normalized image to/from PLC UDT values.
-- bridge_integrado.py enforces recv_exact(sock, 128) and sendall(128 bytes).
+- bridge_integrado.py enforces recv_exact(sock, 128) and sendall(128-byte binary frames).
 
 PLC side (UDTs)
 ---------------

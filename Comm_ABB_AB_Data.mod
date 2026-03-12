@@ -12,7 +12,7 @@ MODULE Comm_ABB_AB_Data
     PERS num CommTimeoutCycles := 0;
 
     ! Virtual inputs (Python -> ABB)
-    PERS dnum VI_Bits{6} := [0,0,0,0,0,0];
+    PERS num  VI_Bits{6} := [0,0,0,0,0,0];
     PERS num  VI_Status{26} := [
         0,0,0,0,0,0,0,0,0,0,0,0,0,
         0,0,0,0,0,0,0,0,0,0,0,0,0
@@ -23,7 +23,7 @@ MODULE Comm_ABB_AB_Data
     ];
 
     ! Virtual outputs (ABB -> Python)
-    PERS dnum VO_Bits{6} := [0,0,0,0,0,0];
+    PERS num  VO_Bits{6} := [0,0,0,0,0,0];
     PERS num  VO_Status{26} := [
         0,0,0,0,0,0,0,0,0,0,0,0,0,
         0,0,0,0,0,0,0,0,0,0,0,0,0

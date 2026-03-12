@@ -43,10 +43,6 @@ MODULE Comm_ABB_AB_Socket
 
         SocketCloseSafe;
 
-        ERROR
-            SocketCloseSafe;
-        ENDERROR
-
         SocketCreate clientSocket;
         bSocketCreated := TRUE;
 
@@ -150,6 +146,7 @@ MODULE Comm_ABB_AB_Socket
     PROC HandleCommError(num nError)
 
         CommOK := FALSE;
+        NewData := FALSE;
         CommLastError := nError;
 
         IF nError = ERR_SOCK_TIMEOUT THEN

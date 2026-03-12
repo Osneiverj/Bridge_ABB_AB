@@ -140,7 +140,7 @@ def main() -> None:
                     continue
 
             try:
-                rx_data = recv_exact(abb_conn, ABB_FRAME_BYTES)
+                rx_data = recv_exact(abb_conn, 128)
                 abb_to_plc_image = unpack_abb_frame(rx_data)
 
                 write_abb_to_plc(plc, abb_to_plc_image)
