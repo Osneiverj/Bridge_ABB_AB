@@ -1,35 +1,27 @@
-Recommended Logix UDTs and controller-scope tags
-===============================================
+PLC UDT definitions for ABB <-> Python bridge
+===========================================
 
-UDT 1: PLC_TO_ROBOT_IF
-----------------------
-Bits        : DINT[6]
-Status      : INT[26]
-Parameters  : INT[26]
+ABB_TO_PLC_IF
+-------------
+- Bits : DINT[6]
+- Status : INT[26]
+- Parameters : INT[26]
 
-UDT 2: ROBOT_TO_PLC_IF
-----------------------
-Bits        : DINT[6]
-Status      : INT[26]
-Parameters  : INT[26]
+PLC_TO_ABB_IF
+-------------
+- Bits : DINT[6]
+- Status : INT[26]
+- Parameters : INT[26]
 
-Recommended controller-scope tags
----------------------------------
-PLC_TO_ROBOT_IF   : PLC_TO_ROBOT_IF
-ROBOT_TO_PLC_IF   : ROBOT_TO_PLC_IF
+Controller-scope tags
+---------------------
+- ABB_TO_PLC_IF : ABB_TO_PLC_IF
+- PLC_TO_ABB_IF : PLC_TO_ABB_IF
 
-Current convention
-------------------
-Status[0] = Watchdog
-Status[1..25] = Status words defined by the communication table
-Parameters[0..25] = Parameter words defined by the communication table
+Binary layout per direction (exactly 128 bytes)
+------------------------------------------------
+1) Bits[0..5] as 6 x signed INT32 (24 bytes)
+2) Status[0..25] as 26 x signed INT16 (52 bytes)
+3) Parameters[0..25] as 26 x signed INT16 (52 bytes)
 
-Current ABB socket frame layout
--------------------------------
-|Bits[0],Bits[1],Bits[2],Bits[3],Bits[4],Bits[5],Status[0]..Status[25],Parameters[0]..Parameters[25]|
-
-Notes
------
-1. Digital signals stay grouped as six DINTs to keep the 192-bit block compact.
-2. Integer words are split by section to keep the interface readable and easier to map later.
-3. The bridge code is schema-driven. If the layout changes later, update comm_schema.py first.
+Total: 24 + 52 + 52 = 128 bytes

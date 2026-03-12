@@ -1,83 +1,80 @@
-"""PLC codec helpers for generic schema-based Logix access.
-"""
+"""PLC codec using UDT-oriented access mapped by central schema."""
+
+from __future__ import annotations
 
 from copy import deepcopy
-from typing import Dict, List, Tuple
+from typing import Any
 
-from comm_schema import COMM_SCHEMA, make_empty_direction
+from comm_schema import COMM_SCHEMA, empty_image
 
 
 def make_empty_image(direction: str) -> dict:
-    """Return a fresh image for the selected direction."""
-    return deepcopy(make_empty_direction(direction))
+    return deepcopy(empty_image(direction))
 
 
-def _direction_cfg(direction: str) -> dict:
+def _cfg(direction: str) -> dict:
     return COMM_SCHEMA[direction]
 
 
-def build_member_tag_list(direction: str) -> List[str]:
-    """Build a flat member tag list for reads based on the schema."""
-    cfg = _direction_cfg(direction)
-    root = cfg["root_tag"]
+def validate_image(direction: str, image: dict) -> None:
+    cfg = _cfg(direction)
 
-    tags: List[str] = []
-
-    for i in range(cfg["digital_dints"]):
-        tags.append(f"{root}.Bits[{i}]")
+    bits = image.get("bits", [])
+    if len(bits) != cfg["bits_dint_count"]:
+        raise ValueError(f"bits length mismatch for {direction}")
 
     for section in cfg["sections"]:
-        sec_name = section["name"]
-        for i in range(section["size"]):
-            tags.append(f"{root}.{sec_name}[{i}]")
-
-    return tags
-
-def build_member_read_list(direction: str) -> List[str]:
-    """Alias kept for readability in the bridge main loop."""
-    return build_member_tag_list(direction)
+        key = section["name"]
+        values = image.get(key, [])
+        if len(values) != section["size"]:
+            raise ValueError(f"{key} length mismatch for {direction}")
 
 
-def build_member_write_list(direction: str, image: Dict[str, List[int]]) -> List[Tuple[str, int]]:
-    """Build a flat write list for plc.write(*items)."""
-    cfg = _direction_cfg(direction)
-    root = cfg["root_tag"]
-
-    items: List[Tuple[str, int]] = []
-
-    for i in range(cfg["digital_dints"]):
-        items.append((f"{root}.Bits[{i}]", int(image["Bits"][i])))
-
-    for section in cfg["sections"]:
-        sec_name = section["name"]
-        values = image[sec_name]
-        for i in range(section["size"]):
-            items.append((f"{root}.{sec_name}[{i}]", int(values[i])))
-
-    return items
+def _extract_tag_value(tag_result: Any) -> Any:
+    if hasattr(tag_result, "value"):
+        return tag_result.value
+    return tag_result
 
 
-def parse_read_results(direction: str, results) -> Dict[str, List[int]]:
-    """Convert plc.read() flat results into a structured image."""
-    cfg = _direction_cfg(direction)
+def parse_udt_value(direction: str, udt_value: dict) -> dict:
+    """Convert PLC UDT dict value to normalized image: bits/status/parameters."""
+    cfg = _cfg(direction)
     image = make_empty_image(direction)
 
-    expected = cfg["digital_dints"] + sum(section["size"] for section in cfg["sections"])
-    if not isinstance(results, list):
-        raise RuntimeError("Unexpected PLC read result type")
-    if len(results) != expected:
-        raise RuntimeError(f"Unexpected PLC read result length: {len(results)} expected {expected}")
-
-    idx = 0
-
-    for i in range(cfg["digital_dints"]):
-        image["Bits"][i] = int(results[idx].value)
-        idx += 1
+    bits = udt_value.get("Bits")
+    if bits is None:
+        bits = udt_value.get("bits")
+    if bits is None:
+        raise ValueError("UDT value missing Bits")
+    image["bits"] = [int(v) for v in bits]
 
     for section in cfg["sections"]:
-        sec_name = section["name"]
-        for i in range(section["size"]):
-            image[sec_name][i] = int(results[idx].value)
-            idx += 1
+        key = section["name"]
+        plc_key = key.capitalize()
+        values = udt_value.get(plc_key)
+        if values is None:
+            values = udt_value.get(key)
+        if values is None:
+            raise ValueError(f"UDT value missing {plc_key}")
+        image[key] = [int(v) for v in values]
 
+    validate_image(direction, image)
     return image
+
+
+def parse_read_result(direction: str, read_result: Any) -> dict:
+    """Parse pycomm3 Tag result (or direct dict) from root UDT read."""
+    value = _extract_tag_value(read_result)
+    if not isinstance(value, dict):
+        raise ValueError("Expected PLC UDT dict value")
+    return parse_udt_value(direction, value)
+
+
+def image_to_udt_payload(direction: str, image: dict) -> dict:
+    """Convert normalized image to payload that can be written to UDT root tag."""
+    validate_image(direction, image)
+    payload = {"Bits": [int(v) for v in image["bits"]]}
+    for section in _cfg(direction)["sections"]:
+        key = section["name"]
+        payload[key.capitalize()] = [int(v) for v in image[key]]
+    return payload
